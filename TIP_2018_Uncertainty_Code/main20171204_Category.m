@@ -1,0 +1,176 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%  Generates results and figures for TIP paper
+%  Written by Tariq Alshawi, PhD student, Georgia Instituet of Tech
+%  contact: talshawi@gatech.edu
+%  Last update: 12/11/2017
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+clear all
+close all
+clc
+categories = {[1:6],[7:15],[16:19],[20 20],[21:27],[28 28],[29:32],[33 33],[34 34],[35:41],[42:46],[47:50]}; 
+%%% Specify lists for input and output files
+ixList={'beverly01.mpg'...
+    'beverly03.mpg'...
+    'beverly05.mpg'...
+    'beverly06.mpg'...
+    'beverly07.mpg'...
+    'beverly08.mpg'...
+    'gamecube02.mpg'...
+    'gamecube04.mpg'...
+    'gamecube05.mpg'...
+    'gamecube06.mpg'...
+    'gamecube13.mpg'...
+    'gamecube16.mpg'...
+    'gamecube17.mpg'...
+    'gamecube18.mpg'...
+    'gamecube23.mpg'...
+    'monica03.mpg'...
+    'monica04.mpg'...
+    'monica05.mpg'...
+    'monica06.mpg'...
+    'saccadetest.mpg'...
+    'standard01.mpg'...
+    'standard02.mpg'...
+    'standard03.mpg'...
+    'standard04.mpg'...
+    'standard05.mpg'...
+    'standard06.mpg'...
+    'standard07.mpg'...
+    'tv-action01.mpg'...
+    'tv-ads01.mpg'...
+    'tv-ads02.mpg'...
+    'tv-ads03.mpg'...
+    'tv-ads04.mpg'...
+    'tv-announce01.mpg'...
+    'tv-music01.mpg'...
+    'tv-news01.mpg'...
+    'tv-news02.mpg'...
+    'tv-news03.mpg'...
+    'tv-news04.mpg'...
+    'tv-news05.mpg'...
+    'tv-news06.mpg'...
+    'tv-news09.mpg'...
+    'tv-sports01.mpg'...
+    'tv-sports02.mpg'...
+    'tv-sports03.mpg'...
+    'tv-sports04.mpg'...
+    'tv-sports05.mpg'...
+    'tv-talk01.mpg'...
+    'tv-talk03.mpg'...
+    'tv-talk04.mpg'...
+    'tv-talk05.mpg'...
+    };
+
+loadFileNames;
+nPoints = 100;
+Th = 0.55;%0.35:0.05:0.65;
+nScores = 6;
+salMapMethodx = {'STSR','3DFFT','PQFT'};
+index = 2;
+mapScale = ['scale1';'scale2';'scale3'];
+filterSize = [5,11,21];
+AUC = zeros(nScores,3);
+for scaleSize=1
+    TP=zeros(nScores,length(iList),nPoints);
+    FP=zeros(nScores,length(iList),nPoints);
+    Positive = zeros(1,length(iList));
+    Negative = zeros(1,length(iList));
+    
+    for k=1:length(iList)
+        disp(['k= ' num2str(k)])
+        %     nFName=strrep(ixList{k}, '.mpg', '_processResults.mat');
+        %     load([pwd '\ProcessResultsScale1\' nFName]);
+        %
+        %     salMap = salMapScale1;
+        % Load Saliency Map
+        salMapMethod = salMapMethodx{index};
+        fileName=strrep(iList{k}, 'MMM', salMapMethod);
+        fileName=strrep(fileName, 'SSS', ['scale' num2str(scaleSize)]);
+        load([pwd '/SaliencyMaps/' fileName]);
+        if strcmp(salMapMethod,'3DFFT'); eval(['salMap = salMapScale' num2str(scaleSize) ';']); end
+        if strcmp(salMapMethod,'STSR')
+            salMap = (salMap-min(salMap(:)))/(max(salMap(:))-min(salMap(:)));
+        end
+        % Load Eye-fixation Map
+        fileName=strrep(iList{k}, 'salMap_MMM', 'subsampledFxTruth');
+        fileName=strrep(fileName, 'SSS',['scale' num2str(scaleSize)]);
+        load([pwd '/EyeFixationMaps/' fileName]);
+        %
+        %     % Generate Uncertainty Groundtruth
+        Tsize = min(size(subsampledFxTruth,3),size(salMap,3));
+        mapSize = size(salMap,1)*size(salMap,2);
+        %     uncert_gTruth = abs((salMap(:,:,1:Tsize)/max(salMap(:)))-subsampledFxTruth(:,:,1:Tsize));
+        uncert_gTruth = abs(salMap(:,:,1:Tsize)-subsampledFxTruth(:,:,1:Tsize));
+        % %     uncert_gTruth = abs((salMap(:,:,1:Tsize)/max(salMap(:))));
+        
+        % Compute Binary Uncertainty Groundtruth
+        GroundTruth = zeros(mapSize*Tsize,length(Th));
+        GroundTruth(:) = uncert_gTruth(:)>=Th;
+        
+        % Compute Scores for uncertainty estimation methods
+        
+        centerPixel = (filterSize(scaleSize)-1)/2;
+        % Spatial uncertainty estimation
+        filter = ones(filterSize(scaleSize),filterSize(scaleSize));filter(centerPixel,centerPixel) = 0;
+        [~, temp] = uncert_spatial(salMap(:,:,1:Tsize), filter);
+        Scores1 = abs(temp(:))/max(temp(:));
+        % Temporal uncertainty estimation
+        filter = ones(1,5);filter(3) = 0;
+        [~, temp] = uncert_temporal(salMap(:,:,1:Tsize), filter);
+        Scores2 = abs(temp(:))/max(temp(:));
+        % Spatiotemporal uncertainty estimation
+        filter = ones(filterSize(scaleSize),filterSize(scaleSize),filterSize(scaleSize));filter(centerPixel,centerPixel,centerPixel) = 0;
+        [~, temp] = uncert_spatioTemporal(salMap(:,:,1:Tsize), filter);
+        Scores3 = abs(temp(:))/max(temp(:));
+        % Entropy uncertainty estimation
+        temp = uncert_EU(salMap(:,:,1:Tsize));
+        Scores4 = abs(temp(:))/max(temp(:));
+        % Spatial + Temporal uncertainty estimation
+        Scores5 = 0.5*Scores1 + 0.5*Scores2;
+        % Variance uncertainty estimation (baseline)
+        filter = ones(filterSize(scaleSize),filterSize(scaleSize),filterSize(scaleSize));filter(centerPixel,centerPixel,centerPixel) = 0;
+        temp = uncert_Variance(salMap(:,:,1:Tsize), filter);
+        Scores6 = abs(temp(:))/max(temp(:));
+        
+        
+        % Count total positives and total negatives
+            Positive(k)= length(find(GroundTruth(:)==1));
+            Negative(k)= length(GroundTruth(:))-Positive(k);
+
+        
+        Distance = [logspace(0,-5,nPoints-1) 0];
+        % Count true positives and true negatives
+        for idxi=1:nPoints
+            TP(1,k,idxi) = sum(GroundTruth(:).*Scores1>Distance(idxi));
+            TP(2,k,idxi) = sum(GroundTruth(:).*Scores2>Distance(idxi));
+            TP(3,k,idxi) = sum(GroundTruth(:).*Scores3>Distance(idxi));
+            TP(4,k,idxi) = sum(GroundTruth(:).*Scores4>Distance(idxi));
+            TP(5,k,idxi) = sum(GroundTruth(:).*Scores5>Distance(idxi));
+            TP(6,k,idxi) = sum(GroundTruth(:).*Scores6>Distance(idxi));
+            
+            FP(1,k,idxi) = sum(not(GroundTruth(:)).*Scores1>Distance(idxi));
+            FP(2,k,idxi) = sum(not(GroundTruth(:)).*Scores2>Distance(idxi));
+            FP(3,k,idxi) = sum(not(GroundTruth(:)).*Scores3>Distance(idxi));
+            FP(4,k,idxi) = sum(not(GroundTruth(:)).*Scores4>Distance(idxi));
+            FP(5,k,idxi) = sum(not(GroundTruth(:)).*Scores5>Distance(idxi));
+            FP(6,k,idxi) = sum(not(GroundTruth(:)).*Scores6>Distance(idxi));
+        end
+    end
+    
+    
+    
+    % Compute AUC values+
+    % SU, TU, STU, EU, SU+TU, Baseline
+    for idxScores=1:nScores
+        for j=1:length(categories)
+            AUC(idxScores, j) = trapz(sum(squeeze(FP(idxScores,categories{j},:)))...
+                /sum(squeeze(Negative(categories{j}))),...
+                sum(squeeze(TP(idxScores,categories{j},:)))...
+                /sum(squeeze(Positive(categories{j}))));
+        end
+    end
+
+    
+
+end
